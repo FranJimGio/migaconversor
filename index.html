@@ -138,6 +138,10 @@
   .faq p { margin: 10px 0 0; font-size: .94rem; color: #5f5256; }
   .foot { text-align: center; color: var(--muted); font-size: .8rem; margin: 6px 0 0; }
 
+  .aviso { font-size: .84rem; color: #7a4a1e; background: #fdf0e3; border-radius: 12px; padding: 10px 12px; margin: 10px 0 0; }
+  .aviso[hidden] { display: none; }
+  .tag { flex: none; font-size: .7rem; font-weight: 600; font-style: normal; color: var(--mauve); background: var(--field); border-radius: 999px; padding: 3px 9px; }
+
   .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); background: var(--ink); color: #fff; padding: 11px 18px; border-radius: 999px; font-weight: 600; font-size: .88rem; opacity: 0; pointer-events: none; transition: .25s; max-width: 90vw; text-align: center; }
   .toast.show { opacity: 1; transform: translate(-50%, 0); }
 </style>
@@ -199,6 +203,7 @@
     <section class="card">
       <h2>Ingredientes ajustados</h2>
       <p class="sub" id="factorTxt"></p>
+      <p class="aviso" id="aviso" hidden></p>
       <div id="lista"></div>
     </section>
 
@@ -242,7 +247,7 @@
     </details>
     <details>
       <summary>¿Entiende tazas, cucharadas y fracciones?</summary>
-      <p>Sí. Lee gramos, kilos, mililitros, litros, tazas, vasos, cucharadas, cucharaditas, pizcas y unidades, y también fracciones como 1/2 o expresiones como "media taza" y "una taza y media".</p>
+      <p>Sí. Lee gramos, kilos, mililitros, litros, tazas (y cups), vasos, cucharadas, cucharaditas, onzas, libras, pizcas y unidades. También entiende fracciones como 1/2, ½ o "2 y 1/3", expresiones como "media taza", y la cantidad al final de la línea, por ejemplo "harina - 300 g".</p>
     </details>
     <details>
       <summary>¿Se ajustan también el horno y el molde?</summary>
@@ -264,18 +269,23 @@
   var UNIDADES = {
     'kg':'kg','kilo':'kg','kilos':'kg',
     'g':'g','gr':'g','grs':'g','gramo':'g','gramos':'g',
-    'ml':'ml','cc':'ml','l':'l','lt':'l','litro':'l','litros':'l',
-    'taza':'taza','tazas':'taza',
+    'ml':'ml','cc':'ml','l':'l','lt':'l','lts':'l','litro':'l','litros':'l',
+    'taza':'taza','tazas':'taza','cup':'cup','cups':'cup',
     'vaso':'vaso','vasos':'vaso',
     'cucharada':'cda','cucharadas':'cda','cda':'cda','cdas':'cda',
     'cucharadita':'cdta','cucharaditas':'cdta','cdita':'cdta','cditas':'cdta','cdta':'cdta','cdtas':'cdta',
+    'tbsp':'tbsp','tbs':'tbsp','tablespoon':'tbsp','tablespoons':'tbsp',
+    'tsp':'tsp','teaspoon':'tsp','teaspoons':'tsp',
+    'oz':'oz','onza':'oz','onzas':'oz','ounce':'oz','ounces':'oz',
+    'lb':'lb','lbs':'lb','libra':'lb','libras':'lb','pound':'lb','pounds':'lb',
     'pizca':'pizca','pizcas':'pizca',
     'diente':'diente','dientes':'diente',
     'unidad':'unidad','unidades':'unidad'
   };
   var NOMBRES = {
     kg:['kg','kg'], g:['g','g'], ml:['ml','ml'], l:['l','l'],
-    taza:['taza','tazas'], vaso:['vaso','vasos'], cda:['cda','cda'], cdta:['cdta','cdta'],
+    taza:['taza','tazas'], cup:['cup','cups'], vaso:['vaso','vasos'], cda:['cda','cda'], cdta:['cdta','cdta'],
+    tbsp:['tbsp','tbsp'], tsp:['tsp','tsp'], oz:['oz','oz'], lb:['lb','lb'],
     pizca:['pizca','pizcas'], diente:['diente','dientes'], unidad:['unidad','unidades']
   };
   var CONTABLES = { '':1, unidad:1, diente:1 };
@@ -283,6 +293,11 @@
     un:1, una:1, uno:1, dos:2, tres:3, cuatro:4, cinco:5, seis:6,
     siete:7, ocho:8, nueve:9, diez:10, medio:0.5, media:0.5
   };
+  var FRAC = {
+    '½':1/2, '¼':1/4, '¾':3/4, '⅓':1/3, '⅔':2/3, '⅛':1/8, '⅜':3/8, '⅝':5/8, '⅞':7/8,
+    '⅕':1/5, '⅖':2/5, '⅗':3/5, '⅘':4/5, '⅙':1/6, '⅚':5/6
+  };
+  var CLASE_FRAC = '[½¼¾⅓⅔⅛⅜⅝⅞⅕⅖⅗⅘⅙⅚]';
 
   function aNumero(txt) {
     if (txt === null || txt === undefined) return NaN;
@@ -302,35 +317,87 @@
     return n > 1.0001 ? NOMBRES[key][1] : NOMBRES[key][0];
   }
 
+  // Lee una cantidad al comienzo del texto: 3, 1,5, 1/2, 1 1/2, 2 y 1/3, 1½, ½, una, media...
   function leerCantidad(texto) {
-    var t = texto.trim().replace(/^[-•*·]\s*/, '');
+    var t = texto.trim();
     var m;
-    m = t.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)/);
-    if (m) return { valor: +m[1] + m[2] / m[3], resto: t.slice(m[0].length).trim() };
+    if (/^\d+(?:[.,]\d+)?\s*[-–—]\s*\d/.test(t)) return null; // rangos (2-3): no se pueden ajustar
+    m = t.match(new RegExp('^(\\d+)\\s*(?:(?:y|e|and|\\+)\\s+)?(' + CLASE_FRAC + ')'));
+    if (m) return { valor: +m[1] + FRAC[m[2]], resto: t.slice(m[0].length).trim() };
+    m = t.match(new RegExp('^(' + CLASE_FRAC + ')'));
+    if (m) return { valor: FRAC[m[1]], resto: t.slice(m[0].length).trim() };
+    m = t.match(/^(\d+)(?:\s+(?:y|e|and|\+))?\s+(\d+)\s*\/\s*(\d+)/);
+    if (m && +m[3] > 0) return { valor: +m[1] + m[2] / m[3], resto: t.slice(m[0].length).trim() };
+    m = t.match(/^(\d+)\s+(?:y|e)\s+(?:media|medio)\b/i);
+    if (m) return { valor: +m[1] + 0.5, resto: t.slice(m[0].length).trim() };
     m = t.match(/^(\d+)\s*\/\s*(\d+)/);
-    if (m) return { valor: m[1] / m[2], resto: t.slice(m[0].length).trim() };
+    if (m && +m[2] > 0) return { valor: m[1] / m[2], resto: t.slice(m[0].length).trim() };
     m = t.match(/^(\d+(?:[.,]\d+)?)/);
     if (m) return { valor: aNumero(m[1]), resto: t.slice(m[0].length).trim() };
-    m = t.match(/^([a-záéíóú]+)\b/i);
+    m = t.match(/^([a-záéíóúñ]+)\b/i);
     if (m && PALABRAS[m[1].toLowerCase()] !== undefined) {
-      return { valor: PALABRAS[m[1].toLowerCase()], resto: t.slice(m[0].length).trim() };
+      var resto = t.slice(m[0].length).trim();
+      if (/^(?:poco|poca|poquito|poquita|toque)\b/i.test(resto)) return null;
+      return { valor: PALABRAS[m[1].toLowerCase()], resto: resto };
     }
     return null;
   }
 
-  function leerLinea(linea) {
-    var c = leerCantidad(linea);
-    if (!c) return { nombre: linea.trim(), original: null, unidad: '', hecho: false };
-    var resto = c.resto, valor = c.valor, unidad = '';
-    var m = resto.match(/^([a-záéíóú]+)\b/i);
+  // Separa la unidad que sigue a la cantidad y una posible fracción posterior ("1 taza y media")
+  function leerUnidad(resto) {
+    var unidad = '';
+    var m = resto.match(/^(?:de\s+)?([a-záéíóúñ]+)\.?(?=$|[\s,;)])/i);
     if (m && UNIDADES[m[1].toLowerCase()]) {
       unidad = UNIDADES[m[1].toLowerCase()];
       resto = resto.slice(m[0].length).trim();
     }
-    var y = resto.match(/^y\s+(media|medio|1\s*\/\s*2)\b/i);
-    if (y) { valor += 0.5; resto = resto.slice(y[0].length).trim(); }
-    resto = resto.replace(/^de\s+/i, '');
-    return { nombre: resto || linea.trim(), unidad: unidad, original: valor, hecho: false };
+    var extra = 0;
+    var y = resto.match(new RegExp('^y\\s+(?:media|medio|1\\s*/\\s*2|½)(?=$|[\\s,;)])', 'i'));
+    if (y) { extra = 0.5; resto = resto.slice(y[0].length).trim(); }
+    return { unidad: unidad, resto: resto, extra: extra };
+  }
+
+  // Cantidad que cierra la línea ("300gr", "2 y 1/3 cup"): debe ocupar todo el texto
+  function leerFinal(texto) {
+    var q = leerCantidad(texto);
+    if (!q || !(q.valor > 0)) return null;
+    var u = leerUnidad(q.resto);
+    if (u.resto.replace(/^\)+/, '').trim() !== '') return null;
+    return { valor: q.valor + u.extra, unidad: u.unidad };
+  }
+
+  function limpiarNombre(s) {
+    return s.replace(/^(?:de|del)\s+/i, '').replace(/[\s,;:\-–—]+$/, '').trim();
+  }
+
+  function leerLinea(linea) {
+    var t = linea.trim().replace(/^[-•*·▪●]\s*/, '').replace(/^\d+[.)]\s+(?=\S)/, '');
+    var vacio = { nombre: linea.trim(), original: null, unidad: '', hecho: false };
+    if (!t) return vacio;
+
+    // 1) cantidad al principio: "300 g harina", "2 y 1/2 cucharadas de azúcar"
+    var q = leerCantidad(t);
+    if (q && q.valor > 0) {
+      var u = leerUnidad(q.resto);
+      return { nombre: limpiarNombre(u.resto) || t, unidad: u.unidad, original: q.valor + u.extra, hecho: false };
+    }
+
+    // 2) cantidad al final, tras un separador: "harina 000 - 300gr", "huevos: 2", "sal (1 pizca)"
+    var re = /\s+[-–—]\s+|\s*:\s*|\s*\(/g, m, f, antes;
+    while ((m = re.exec(t)) !== null) {
+      antes = t.slice(0, m.index).trim();
+      f = leerFinal(t.slice(m.index + m[0].length).trim());
+      if (antes && f) return { nombre: limpiarNombre(antes), unidad: f.unidad, original: f.valor, hecho: false };
+    }
+
+    // 3) cantidad al final sin separador: "harina 000 300 g"
+    var ws = /\s+/g;
+    while ((m = ws.exec(t)) !== null) {
+      antes = t.slice(0, m.index).trim();
+      f = leerFinal(t.slice(m.index + m[0].length));
+      if (antes && f) return { nombre: limpiarNombre(antes), unidad: f.unidad, original: f.valor, hecho: false };
+    }
+    return vacio;
   }
 
   // Consejo para ingredientes que se cuentan por unidad y quedan con fracción
@@ -386,6 +453,13 @@
   function dibujarLista() {
     var lista = $('lista');
     lista.innerHTML = '';
+    var sinCant = items.filter(function (i) { return i.original === null && !/:\s*$/.test(i.nombre); }).length;
+    var av = $('aviso');
+    av.hidden = !sinCant;
+    if (sinCant) {
+      av.textContent = 'No pude leer la cantidad en ' + sinCant + (sinCant === 1 ? ' línea' : ' líneas') +
+        ', así que no se ajusta' + (sinCant === 1 ? '' : 'n') + '. Probá escribirla como "300 g harina" o "harina - 300 g".';
+    }
     items.forEach(function (it) {
       var fila = document.createElement('label');
       fila.className = 'ing' + (it.original === null ? ' plain' : '') + (it.hecho ? ' done' : '');
@@ -407,6 +481,11 @@
         am.className = 'am';
         am.textContent = fmt(n) + (it.unidad ? ' ' + unidadTxt(it.unidad, n) : '');
         fila.appendChild(am);
+      } else if (!/:\s*$/.test(it.nombre)) {
+        var tg = document.createElement('span');
+        tg.className = 'tag';
+        tg.textContent = 'sin ajustar';
+        fila.appendChild(tg);
       }
       lista.appendChild(fila);
     });
